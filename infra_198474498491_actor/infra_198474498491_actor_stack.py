@@ -1,42 +1,47 @@
-from aws_cdk import core as cdk, aws_lambda as _lambda, aws_iam as iam
-
-# For consistency with other languages, `cdk` is the preferred import name for
-# the CDK's core module.  The following line also imports it as `core` for use
-# with examples from the CDK Developer's Guide, which are in the process of
-# being updated to use `cdk`.  You may delete this import if you don't need it.
-from aws_cdk import core
+from aws_cdk import (
+    aws_iam as iam,
+    aws_lambda as _lambda,
+    aws_s3 as s3,
+    aws_s3_notifications as s3_notify,
+    core as cdk
+)
 
 
 class Infra198474498491ActorStack(cdk.Stack):
-    def __init__(self, scope: cdk.Construct, construct_id: str, **kwargs) -> None:
+    def __init__(self, scope: cdk.Construct, construct_id: str, **kwargs):
 
         super().__init__(scope, construct_id, **kwargs)
 
-        athena_permission = iam.PolicyStatement(
-            effect=iam.Effect.ALLOW,
-            actions=[
-                "athena:GetWorkGroup",
-                "s3:PutObject",
-                "s3:GetObject",
-                "athena:StartQueryExecution",
-                "s3:AbortMultipartUpload",
-                "lambda:InvokeFunction",
-                "athena:StopQueryExecution",
-                "athena:GetQueryExecution",
-                "athena:GetQueryResults",
-                "s3:ListMultipartUploadParts",
-            ],
-            resources=[
-                "*",
-            ],
-        )
+        # _lambda.Function(
+        #     self,
+        #     "S3TriggeredLambda",
+        #     code=_lambda.Code.from_asset("src/lambda/s3-lambda"),
+        #     handler="on_event",
+        #     runtime=_lambda.Runtime.PYTHON_3_8,
+        # )
 
-        my_lambda = _lambda.Function(
+        # create new IAM group and use
+        group = iam.Group(self, "s3-lambda-group")
+        user = iam.User(self, "s3-lambda-user")
+
+        # Add IAM user to the group
+        user.add_to_group(group)
+
+        # Create S3 Bucket
+        bucket = s3.Bucket(self, 'vs-bucket')
+        bucket.grant_read_write(user)
+        # Create a lambda function
+        lambda_func = _lambda.Function(
             self,
-            "MyAthenaLambda",
-            code=_lambda.Code.from_asset("src/lambda/athena-lambda"),
-            handler="on_event",
+            'LambdaListener',
             runtime=_lambda.Runtime.PYTHON_3_8,
+            handler='LambdaListener.handler',
+            code=_lambda.Code.from_asset("src/lambda/s3-lambda"),
+            environment={'BUCKET_NAME': bucket.bucket_name}
         )
-
-        my_lambda.add_to_role_policy(athena_permission)
+        # Create trigger for Lambda function using suffix
+        notification = s3_notify.LambdaDestination(lambda_func)
+        notification.bind(self, bucket)
+        # Add Create Event only for .jpg files
+        bucket.add_object_created_notification(
+           notification, s3.NotificationKeyFilter(suffix='.jpg'))
